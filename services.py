@@ -291,4 +291,40 @@ def get_financial_by_range(db: Session, company_id: int, start_date: datetime, e
 
     return df_sales, df_expenses
 
+def update_product(
+    db: Session,
+    company_id: int,
+    product_id: int,
+    name: str,
+    sku: str,
+    price_retail: float,
+    price_wholesale: float,
+    stock_min: int
+):
+    prod = db.query(Product).filter(
+        Product.id == product_id,
+        Product.company_id == company_id
+    ).first()
+    if not prod:
+        return False, "Produto não encontrado"
+
+    # SKU não pode repetir dentro da empresa
+    sku_conflict = db.query(Product).filter(
+        Product.company_id == company_id,
+        Product.sku == sku,
+        Product.id != product_id
+    ).first()
+    if sku_conflict:
+        return False, "Já existe outro produto com esse SKU"
+
+    prod.name = name
+    prod.sku = sku
+    prod.price_retail = float(price_retail)
+    prod.price_wholesale = float(price_wholesale)
+    prod.stock_min = int(stock_min)
+
+    db.commit()
+    return True, "Produto atualizado"
+
+
 
