@@ -1,42 +1,95 @@
 # services.py
-import bcrypt
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime
+from typing import Tuple, Optional
+
 import pandas as pd
-from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from models import User, Product, Sale, Expense, Company
+
+from models import User, Company, Product, Sale, Expense
+
 
 # =========================
-# 🔐 SEGURANÇA / USUÁRIOS
+# 🔐 SENHAS (bcrypt com fallback)
 # =========================
+
+def _bcrypt_available() -> bool:
+    try:
+        import bcrypt  # noqa
+        return True
+    except Exception:
+        return False
+
 
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    """
+    Retorna hash.
+    - Preferencial: bcrypt (mais seguro)
+    - Fallback: sha256 (não ideal, mas evita quebrar o deploy)
+    """
+    if _bcrypt_available():
+        import bcrypt
+        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
 
 def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode(), hashed.encode())
+    if not hashed:
+        return False
 
-def authenticate(db: Session, username: str, password: str):
+    # Se parece bcrypt ($2b$, $2a$, $2y$)
+    if hashed.startswith("$2"):
+        try:
+            import bcrypt
+            return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+        except Exception:
+            return False
+
+    # Fallback sha256
+    return hashlib.sha256(password.encode("utf-8")).hexdigest() == hashed
+
+
+# =========================
+# 👤 AUTH / BOOTSTRAP
+# =========================
+
+def authenticate(db: Session, username: str, password: str) -> Optional[User]:
     user = db.query(User).filter(User.username == username).first()
     if user and verify_password(password, user.password_hash):
         return user
     return None
 
-def create_initial_data(db: Session):
-    if not db.query(Company).filter_by(id=1).first():
-        company = Company(id=1, name="Empresa Principal", license_key="MASTER")
+
+def create_initial_data(db: Session) -> None:
+    """
+    Cria uma empresa e um admin padrão se o banco estiver vazio.
+    Compatível com seu models.py atual (Company só tem name).
+    """
+    # Se já existe algum usuário, não mexe
+    exists_user = db.query(User.id).first()
+    if exists_user:
+        return
+
+    # Cria empresa base
+    company = db.query(Company).first()
+    if not company:
+        company = Company(name="Empresa Principal")
         db.add(company)
         db.commit()
+        db.refresh(company)
 
-    if not db.query(User).filter_by(username="admin").first():
-        admin = User(
-            username="admin",
-            password_hash=hash_password("admin123"),
-            role="admin",
-            company_id=1
-        )
-        db.add(admin)
-        db.commit()
+    # Cria admin
+    admin = User(
+        username="admin",
+        password_hash=hash_password("admin123"),
+        role="admin",
+        company_id=company.id
+    )
+    db.add(admin)
+    db.commit()
+
 
 # =========================
 # 📦 PRODUTOS / ESTOQUE
@@ -45,111 +98,197 @@ def create_initial_data(db: Session):
 def get_products(db: Session, company_id: int):
     return db.query(Product).filter(Product.company_id == company_id).all()
 
-def register_product(db: Session, company_id: int, name, price_retail, price_wholesale, stock_min, sku):
+
+def register_product(
+    db: Session,
+    company_id: int,
+    name: str,
+    price_retail: float,
+    price_wholesale: float,
+    stock_min: int,
+    sku: str
+) -> Tuple[bool, str]:
+    if not name or not sku:
+        return False, "Nome e SKU são obrigatórios"
+
+    # Evita SKU duplicado por empresa
+    exists = db.query(Product).filter(
+        Product.company_id == company_id,
+        Product.sku == sku
+    ).first()
+    if exists:
+        return False, "Já existe um produto com esse SKU"
+
     prod = Product(
+        company_id=company_id,
         name=name,
-        price_retail=price_retail,
-        price_wholesale=price_wholesale,
-        stock=0,
-        stock_min=stock_min,
         sku=sku,
-        company_id=company_id
+        price_retail=float(price_retail),
+        price_wholesale=float(price_wholesale),
+        stock=0,
+        stock_min=int(stock_min)
     )
     db.add(prod)
     db.commit()
+    return True, "Produto cadastrado"
 
-def delete_product(db: Session, product_id: int, company_id: int):
-    prod = db.query(Product).filter_by(id=product_id, company_id=company_id).first()
-    if prod:
-        db.delete(prod)
-        db.commit()
 
-def restock_product(db: Session, company_id: int, product_id: int, qty: int, cost_unit: float):
-    product = db.query(Product).filter_by(id=product_id, company_id=company_id).first()
+def restock_product(db: Session, company_id: int, product_id: int, qty: int, cost_unit: float) -> Tuple[bool, str]:
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.company_id == company_id
+    ).first()
     if not product:
-        return False
+        return False, "Produto não encontrado"
 
-    product.stock += qty
+    if qty <= 0:
+        return False, "Quantidade inválida"
 
-    expense = Expense(
-        description=f"Reposição {product.name}",
-        amount=qty * cost_unit,
-        category="CMV",
+    product.stock = int(product.stock or 0) + int(qty)
+
+    # Registra despesa (CMV)
+    total_cost = float(qty) * float(cost_unit)
+    desc = f"Reposição Estoque: {product.name} ({qty}x R$ {cost_unit:.2f})"
+
+    exp = Expense(
         company_id=company_id,
-        date=datetime.now()
+        description=desc,
+        category="CMV",
+        amount=total_cost,
+        date=datetime.utcnow()
     )
-    db.add(expense)
+    db.add(exp)
     db.commit()
-    return True
+    return True, "Estoque atualizado"
+
+
+def delete_product(db: Session, company_id: int, product_id: int) -> Tuple[bool, str]:
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.company_id == company_id
+    ).first()
+    if not product:
+        return False, "Produto não encontrado"
+
+    # Segurança: não excluir se já tem venda
+    has_sale = db.query(Sale.id).filter(
+        Sale.company_id == company_id,
+        Sale.product_id == product_id
+    ).first()
+    if has_sale:
+        return False, "Não é possível excluir: produto já tem vendas registradas"
+
+    db.delete(product)
+    db.commit()
+    return True, "Produto excluído"
+
 
 # =========================
-# 🛒 VENDAS / PDV
+# 🛒 VENDAS (PDV) - valida estoque por empresa
 # =========================
 
-def process_sale(db: Session, product_id: int, qty: int, kind: str, user_id: int, company_id: int):
-    product = db.query(Product).filter_by(id=product_id, company_id=company_id).first()
+def process_sale(
+    db: Session,
+    product_id: int,
+    qty: int,
+    kind: str,
+    user_id: int,
+    company_id: int
+) -> Tuple[bool, str]:
+    qty = int(qty)
+
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.company_id == company_id
+    ).first()
 
     if not product:
         return False, "Produto não encontrado"
 
-    if product.stock < qty:
-        return False, f"Estoque insuficiente ({product.stock})"
+    if qty <= 0:
+        return False, "Quantidade inválida"
 
-    product.stock -= qty
+    stock_now = int(product.stock or 0)
+    if stock_now < qty:
+        return False, f"Estoque insuficiente ({stock_now} disponível)"
+
+    product.stock = stock_now - qty
 
     sale = Sale(
-        product_id=product.id,
-        quantity=qty,
-        price=product.price_retail,
-        kind=kind,
-        user_id=user_id,
         company_id=company_id,
-        date=datetime.now()
+        product_id=product_id,
+        quantity=qty,
+        price=float(product.price_retail or 0.0),
+        user_id=user_id,
+        date=datetime.utcnow()
     )
+
     db.add(sale)
     db.commit()
-    return True, "Venda realizada"
+    return True, "Venda concluída"
+
 
 # =========================
 # 💰 FINANCEIRO
 # =========================
 
-def add_expense(db: Session, company_id: int, desc, amount, category, date):
+def add_expense(db: Session, company_id: int, desc: str, amount: float, category: str, date: datetime) -> Tuple[bool, str]:
+    if not desc or float(amount) <= 0:
+        return False, "Preencha descrição e valor"
+
     exp = Expense(
-        description=desc,
-        amount=amount,
-        category=category,
         company_id=company_id,
+        description=desc,
+        category=category,
+        amount=float(amount),
         date=date
     )
     db.add(exp)
     db.commit()
+    return True, "Despesa lançada"
 
-def get_financial_by_range(db: Session, company_id: int, start_date, end_date):
-    sales_q = db.query(
-        Sale.date,
-        Sale.quantity,
-        Sale.price,
-        Product.name.label("product_name")
-    ).join(Product).filter(
+
+def get_financial_by_range(db: Session, company_id: int, start_date: datetime, end_date: datetime):
+    """
+    Como seu models.py não tem FK/relationship em Sale->Product,
+    evitamos join ORM e montamos o dataframe com lookup de produtos.
+    """
+    sales = db.query(Sale).filter(
         Sale.company_id == company_id,
         Sale.date >= start_date,
         Sale.date <= end_date
-    ).statement
+    ).all()
 
-    expense_q = db.query(
-        Expense.date,
-        Expense.category,
-        Expense.description,
-        Expense.amount
-    ).filter(
+    expenses = db.query(Expense).filter(
         Expense.company_id == company_id,
         Expense.date >= start_date,
         Expense.date <= end_date
-    ).statement
+    ).all()
 
-    df_sales = pd.read_sql(sales_q, db.bind)
-    df_exp = pd.read_sql(expense_q, db.bind)
-    return df_sales, df_exp
+    # Mapa de produto_id -> nome (para preencher product_name)
+    prods = db.query(Product.id, Product.name).filter(Product.company_id == company_id).all()
+    prod_map = {pid: name for pid, name in prods}
+
+    df_sales = pd.DataFrame([{
+        "date": s.date,
+        "quantity": s.quantity,
+        "price": s.price,
+        "product_name": prod_map.get(s.product_id, f"Produto #{s.product_id}")
+    } for s in sales])
+
+    df_expenses = pd.DataFrame([{
+        "date": e.date,
+        "description": e.description,
+        "category": e.category,
+        "amount": e.amount
+    } for e in expenses])
+
+    # garante colunas mesmo vazio
+    if df_sales.empty:
+        df_sales = pd.DataFrame(columns=["date", "quantity", "price", "product_name"])
+    if df_expenses.empty:
+        df_expenses = pd.DataFrame(columns=["date", "description", "category", "amount"])
+
+    return df_sales, df_expenses
 
 
