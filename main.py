@@ -271,75 +271,127 @@ elif choice == "🛒 Checkout (PDV)":
 
     # --- COLUNA DA ESQUERDA (PRODUTOS) ---
     with col_prod:
-        search = st.text_input("🔍 Pesquisar produto ou código de barras...", placeholder="Ex: iPhone...")
+        search = st.text_input(
+            "🔍 Pesquisar produto ou código de barras...",
+            placeholder="Ex: iPhone..."
+        )
+
         prods = api.get_products(db, cid)
 
         # Grid de produtos
         p_cols = st.columns(3)
+
         # Filtro simples
         filtered_prods = [pr for pr in prods if search.lower() in pr.name.lower()]
-        
+
         for i, p in enumerate(filtered_prods):
             with p_cols[i % 3]:
                 st.markdown(f"""
-                <div style="background: white; padding: 20px; border-radius: 15px; border: 1px solid #E0E5F2; text-align: center; margin-bottom: 10px;">
+                <div style="background: white; padding: 20px; border-radius: 15px;
+                            border: 1px solid #E0E5F2; text-align: center; margin-bottom: 10px;">
                     <div style="font-size: 2rem;">📱</div>
-                    <div style="font-weight: 700; color: #1B2559; margin: 10px 0;">{p.name}</div>
-                    <div style="color: #6366F1; font-weight: 800;">€ {p.price_retail:,.2f}</div>
+                    <div style="font-weight: 700; color: #1B2559; margin: 10px 0;">
+                        {p.name}
+                    </div>
+                    <div style="color: #6366F1; font-weight: 800;">
+                        R$ {p.price_retail:,.2f}
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
+
+                # 🔢 QUANTIDADE
+                qtd = st.number_input(
+                    "Qtd",
+                    min_value=1,
+                    max_value=p.stock,
+                    step=1,
+                    value=1,
+                    key=f"qtd_{p.id}"
+                )
+
                 if st.button("Adicionar", key=f"add_{p.id}", use_container_width=True):
-                    st.session_state['cart'].append({"id": p.id, "name": p.name, "price": p.price_retail})
+                    st.session_state['cart'].append({
+                        "id": p.id,
+                        "name": p.name,
+                        "price": p.price_retail,
+                        "qty": qtd
+                    })
                     st.rerun()
 
     # --- COLUNA DA DIREITA (CUPOM) ---
     with col_receipt:
-        # 1. Construção do HTML do Cupom (Visual Preto)
         receipt_html = '<div class="receipt-panel">'
-        
-        # Cabeçalho
-        receipt_html += f'<div class="receipt-title">CUPÃO FISCAL #{datetime.now().strftime("%H%M")}</div>'
+        receipt_html += (
+            f'<div class="receipt-title">'
+            f'CUPÃO FISCAL #{datetime.now().strftime("%H%M")}'
+            f'</div>'
+        )
 
-        # Itens
         total = 0.0
+
         if not st.session_state['cart']:
-            receipt_html += '<div style="color: #4B5563; text-align: center; margin-top: 60px;">Aguardando produtos...</div>'
+            receipt_html += (
+                '<div style="color: #4B5563; text-align: center; margin-top: 60px;">'
+                'Aguardando produtos...'
+                '</div>'
+            )
         else:
             for item in st.session_state['cart']:
-                total += item['price']
-                receipt_html += f'<div class="receipt-item"><span>{item["name"]}</span><span style="font-weight: 700;">€ {item["price"]:,.2f}</span></div>'
+                subtotal = item["price"] * item["qty"]
+                total += subtotal
+
+                receipt_html += f"""
+                <div class="receipt-item">
+                    <span>{item["name"]} x{item["qty"]}</span>
+                    <span style="font-weight: 700;">
+                        R$ {subtotal:,.2f}
+                    </span>
+                </div>
+                """
 
         # Totalização
         receipt_html += '<div class="receipt-total-section">'
-        receipt_html += f'<div class="receipt-item"><span style="color: #A3AED0;">Subtotal</span><span>€ {total:,.2f}</span></div>'
+        receipt_html += (
+            f'<div class="receipt-item">'
+            f'<span style="color: #A3AED0;">Subtotal</span>'
+            f'<span>R$ {total:,.2f}</span>'
+            f'</div>'
+        )
         receipt_html += f"""
-            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-top: 10px;">
-                <span style="color: #A3AED0; font-weight: 700; font-size: 0.9rem;">TOTAL</span>
-                <span class="total-value">€ {total:,.2f}</span>
+            <div style="display: flex; justify-content: space-between;
+                        align-items: baseline; margin-top: 10px;">
+                <span style="color: #A3AED0; font-weight: 700; font-size: 0.9rem;">
+                    TOTAL
+                </span>
+                <span class="total-value">R$ {total:,.2f}</span>
             </div>
         """
-        receipt_html += '</div>' # Fecha seção total
-        receipt_html += '</div>' # Fecha o painel preto AQUI.
-        
-        # 2. Renderiza o visual
+        receipt_html += '</div></div>'
+
         st.markdown(receipt_html, unsafe_allow_html=True)
 
-        # 3. Botões (Ficam FORA do HTML, logo abaixo)
-        st.write("") # Espaçamento
-        
+        st.write("")
+
+        # --- FINALIZAR VENDA ---
         if st.button("FINALIZAR VENDA (F10)", type="primary", use_container_width=True):
             if st.session_state['cart']:
                 for item in st.session_state['cart']:
-                    # Certifique-se que api.process_sale existe e aceita esses argumentos
-                    api.process_sale(db, item['id'], 1, "varejo", st.session_state['user_id'], cid)
-                st.session_state['cart'] = []
+                    api.process_sale(
+                        db,
+                        item["id"],
+                        item["qty"],          # 👈 QUANTIDADE CORRETA
+                        "varejo",
+                        st.session_state["user_id"],
+                        cid
+                    )
+                st.session_state["cart"] = []
                 st.success("Venda processada!")
                 st.rerun()
             else:
                 st.warning("Carrinho vazio!")
 
         if st.button("🗑️ Limpar Tudo", use_container_width=True):
-            st.session_state['cart'] = []
+            st.session_state["cart"] = []
             st.rerun()
 
 
