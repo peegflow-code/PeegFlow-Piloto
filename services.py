@@ -31,6 +31,14 @@ def authenticate(db: Session, username: str, password: str):
 # =========================
 
 def create_initial_data(db: Session):
+    """
+    Bootstrap seguro:
+    - cria empresa se não existir
+    - cria admin se não existir
+    - corrige hash antigo automaticamente (SHA256 → bcrypt)
+    """
+
+    # Empresa
     company = db.query(Company).filter(Company.id == 1).first()
     if not company:
         company = Company(
@@ -42,19 +50,30 @@ def create_initial_data(db: Session):
         db.add(company)
         db.commit()
 
-    # 🔥 REMOVE admin antigo (SHA256)
-    db.query(User).filter(User.username == "admin").delete()
-    db.commit()
+    # Admin
+    admin = db.query(User).filter(User.username == "admin").first()
 
-    # ✅ CRIA admin novo (bcrypt)
-    admin = User(
-        username="admin",
-        password_hash=hash_password("admin123"),
-        role="admin",
-        company_id=company.id
-    )
-    db.add(admin)
-    db.commit()
+    if not admin:
+        # cria admin novo
+        admin = User(
+            username="admin",
+            password_hash=hash_password("admin123"),
+            role="admin",
+            company_id=company.id
+        )
+        db.add(admin)
+        db.commit()
+
+    else:
+        # 🔁 garante que a senha esteja em bcrypt
+        try:
+            import bcrypt
+            bcrypt.checkpw(b"test", admin.password_hash.encode())
+        except Exception:
+            # hash antigo → atualiza
+            admin.password_hash = hash_password("admin123")
+            db.commit()
+
 
 # =========================
 # 👥 CRUD DE USUÁRIOS
