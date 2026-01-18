@@ -559,7 +559,7 @@ for idx in range(len(st.session_state["cart"]) - 1, -1, -1):
 # -------------------------
 # FINANCEIRO (R$)
 # -------------------------
-elif choice == "💰 Fluxo Financeiro":
+if choice == "💰 Fluxo Financeiro":
     st.title("Gestão Financeira Integrada")
 
     tab_fechamento, tab_calendario = st.tabs(["📊 Fechamento de Caixa", "🗓️ Calendário Fiscal & Despesas"])
