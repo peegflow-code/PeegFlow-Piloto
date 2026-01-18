@@ -106,16 +106,6 @@ if not st.session_state['logged_in']:
                 else:
                     st.error("Credenciais inválidas")
 
-            # Botão Demo
-            if st.form_submit_button("🧪 Ativar Modo Demo (30 dias)", use_container_width=True):
-                api.setup_demo_data(db)
-                st.session_state.update({
-                    'logged_in': True, 
-                    'user_id': 99, 
-                    'company_id': 99, 
-                    'username': 'Admin Demo'
-                })
-                st.rerun()
                 
         st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
