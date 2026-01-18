@@ -195,3 +195,22 @@ def get_financial_by_range(
     df_expenses = pd.read_sql(expenses_q.statement, db.bind)
 
     return df_sales, df_expenses
+
+def delete_product(db: Session, company_id: int, product_id: int):
+    product = db.query(Product).filter(
+        Product.id == product_id,
+        Product.company_id == company_id
+    ).first()
+
+    if not product:
+        return False, "Produto não encontrado"
+
+    # Verificação de segurança: não excluir se houver vendas
+    has_sales = db.query(Sale).filter(Sale.product_id == product_id).first()
+    if has_sales:
+        return False, "Produto possui vendas registradas"
+
+    db.delete(product)
+    db.commit()
+    return True, "Produto excluído com sucesso"
+
