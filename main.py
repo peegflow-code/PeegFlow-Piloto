@@ -1,120 +1,111 @@
 import streamlit as st
-from datetime import datetime
-from database import get_db
+from database import get_db, engine, Base
 import services as api
+from models import User
+from datetime import datetime
+import base64
 
-st.set_page_config(page_title="PeegFlow", layout="wide")
+# ---------------- INIT ----------------
+st.set_page_config(page_title="PeegFlow Pro", page_icon="⚡", layout="wide")
+Base.metadata.create_all(bind=engine)
 
-if "user" not in st.session_state:
-    st.session_state.user = None
+db = next(get_db())
+api.create_initial_data(db)
 
+# ---------------- SESSION ----------------
+if "logged_in" not in st.session_state:
+    st.session_state.update({
+        "logged_in": False,
+        "user_id": None,
+        "company_id": None,
+        "username": None,
+        "role": None
+    })
 
-# ---------- LOGIN ----------
-
-def login(db):
-    st.title("🔐 Login")
-
+# ---------------- LOGIN ----------------
+if not st.session_state["logged_in"]:
+    st.title("PeegFlow Login")
     with st.form("login"):
         u = st.text_input("Usuário")
         p = st.text_input("Senha", type="password")
-
         if st.form_submit_button("Entrar"):
-            user = api.authenticate_user(db, u, p)
+            user = api.authenticate(db, u, p)
             if user:
-                st.session_state.user = user
+                st.session_state.update({
+                    "logged_in": True,
+                    "user_id": user.id,
+                    "company_id": user.company_id,
+                    "username": user.username,
+                    "role": user.role
+                })
                 st.rerun()
             else:
                 st.error("Credenciais inválidas")
+    st.stop()
 
+# ---------------- SIDEBAR ----------------
+with st.sidebar:
+    st.write(f"👤 {st.session_state['username']}")
+    st.write(f"🔐 Perfil: {st.session_state['role']}")
+    st.divider()
 
-def logout():
-    st.session_state.user = None
-    st.rerun()
+    menu = ["📊 Dashboard", "🛒 PDV"]
 
+    if st.session_state["role"] == "admin":
+        menu += ["👥 Usuários", "🔐 Trocar Senha"]
 
-# ---------- PÁGINAS ----------
+    choice = st.radio("Menu", menu)
 
-def estoque(db):
-    user = st.session_state.user
-    cid = user.company_id
+    if st.button("Sair"):
+        st.session_state.clear()
+        st.rerun()
 
-    st.title("📦 Estoque")
+# ---------------- DASHBOARD ----------------
+if choice == "📊 Dashboard":
+    st.title("Dashboard")
+    st.success("Sistema funcionando com permissões ✔")
 
-    prods = api.get_products(db, cid)
-    st.dataframe([{
-        "Produto": p.name,
-        "SKU": p.sku,
-        "Estoque": p.stock,
-        "Mínimo": p.stock_min
-    } for p in prods], use_container_width=True)
+# ---------------- PDV ----------------
+elif choice == "🛒 PDV":
+    st.title("Checkout (PDV)")
+    st.info("Acesso permitido para admin e user")
 
-    if user.role != "admin":
-        st.info("🔒 Somente administradores podem alterar o estoque.")
-        return
+# ---------------- USUÁRIOS (ADMIN) ----------------
+elif choice == "👥 Usuários":
+    st.title("Gestão de Usuários")
+
+    users = api.list_users(db, st.session_state["company_id"])
+
+    for u in users:
+        col1, col2, col3 = st.columns([3,2,1])
+        col1.write(u.username)
+        col2.write(u.role)
+        if u.username != "admin":
+            if col3.button("🗑️", key=f"del{u.id}"):
+                api.delete_user(db, u.id, st.session_state["company_id"])
+                st.rerun()
 
     st.divider()
-    st.subheader("➕ Novo Produto")
-
-    with st.form("new_prod"):
-        name = st.text_input("Nome")
-        sku = st.text_input("SKU")
-        price = st.number_input("Preço Venda", min_value=0.0)
-        cost = st.number_input("Preço Custo", min_value=0.0)
-        min_stock = st.number_input("Estoque mínimo", min_value=1, value=5)
-
-        if st.form_submit_button("Salvar"):
-            api.register_product(db, cid, name, price, cost, min_stock, sku)
-            st.success("Produto cadastrado")
+    st.subheader("Novo Usuário")
+    with st.form("new_user"):
+        nu = st.text_input("Usuário")
+        np = st.text_input("Senha", type="password")
+        nr = st.selectbox("Perfil", ["user", "admin"])
+        if st.form_submit_button("Criar"):
+            api.create_user(db, st.session_state["company_id"], nu, np, nr)
+            st.success("Usuário criado")
             st.rerun()
 
+# ---------------- TROCAR SENHA ----------------
+elif choice == "🔐 Trocar Senha":
+    st.title("Trocar Senha")
+    with st.form("pwd"):
+        p1 = st.text_input("Nova senha", type="password")
+        p2 = st.text_input("Confirmar senha", type="password")
+        if st.form_submit_button("Salvar"):
+            if p1 == p2 and len(p1) >= 6:
+                api.change_password(db, st.session_state["user_id"], p1)
+                st.success("Senha atualizada")
+            else:
+                st.error("Senhas inválidas")
 
-def financeiro(db):
-    user = st.session_state.user
-
-    if user.role != "admin":
-        st.error("🔒 Acesso restrito ao administrador")
-        return
-
-    st.title("💰 Financeiro")
-
-    start = st.date_input("Data início")
-    end = st.date_input("Data fim")
-
-    df_sales, df_exp = api.get_financial_by_range(
-        db,
-        user.company_id,
-        datetime.combine(start, datetime.min.time()),
-        datetime.combine(end, datetime.max.time())
-    )
-
-    st.subheader("Vendas")
-    st.dataframe(df_sales, use_container_width=True)
-
-    st.subheader("Despesas")
-    st.dataframe(df_exp, use_container_width=True)
-
-
-# ---------- APP ----------
-
-def main():
-    db = next(get_db())
-
-    if not st.session_state.user:
-        login(db)
-        return
-
-    with st.sidebar:
-        st.write(f"👤 {st.session_state.user.username}")
-        st.write(f"🔑 Perfil: {st.session_state.user.role}")
-        page = st.radio("Menu", ["📦 Estoque", "💰 Financeiro", "🚪 Sair"])
-
-    if page == "📦 Estoque":
-        estoque(db)
-    elif page == "💰 Financeiro":
-        financeiro(db)
-    elif page == "🚪 Sair":
-        logout()
-
-
-if __name__ == "__main__":
-    main()
