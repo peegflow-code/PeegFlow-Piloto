@@ -310,7 +310,7 @@ def generate_receipt_80mm(cart, total, payment):
     buffer.seek(0)
     return buffer
 
-elif choice == "🛒 Checkout (PDV)":
+if choice == "🛒 Checkout (PDV)":
     st.title("Ponto de Venda")
 
     if "cart" not in st.session_state:
