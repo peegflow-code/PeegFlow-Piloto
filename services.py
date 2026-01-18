@@ -1,217 +1,104 @@
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from datetime import datetime
-import bcrypt
+from werkzeug.security import check_password_hash
+from models import User, Product, Sale, Expense
 import pandas as pd
+from datetime import datetime
 
-from models import User, Product, Sale, Expense, Company
-
-def create_company_with_admin(
-    db: Session,
-    company_name: str,
-    username: str,
-    password: str
-):
-    # Empresa
-    company = Company(name=company_name)
-    db.add(company)
-    db.commit()
-    db.refresh(company)
-
-    # Hash da senha
-    password_hash = bcrypt.hashpw(
-        password.encode("utf-8"),
-        bcrypt.gensalt()
-    ).decode("utf-8")
-
-    admin = User(
-        username=username,
-        password_hash=password_hash,
-        role="admin",
-        company_id=company.id
-    )
-    db.add(admin)
-    db.commit()
-
-    return company
+# ---------- AUTH ----------
 
 def authenticate_user(db: Session, username: str, password: str):
     user = db.query(User).filter(User.username == username).first()
-    if not user:
-        return None
-
-    if bcrypt.checkpw(
-        password.encode("utf-8"),
-        user.password_hash.encode("utf-8")
-    ):
+    if user and check_password_hash(user.password_hash, password):
         return user
-
     return None
 
 
-def get_products(db: Session, company_id: int):
-    return (
-        db.query(Product)
-        .filter(Product.company_id == company_id)
-        .order_by(Product.name)
-        .all()
-    )
+def require_admin(user):
+    if user.role != "admin":
+        raise PermissionError("Acesso restrito a administradores")
 
 
-def register_product(
-    db: Session,
-    company_id: int,
-    name: str,
-    price_retail: float,
-    price_wholesale: float,
-    stock_min: int,
-    sku: str
-):
-    product = Product(
+# ---------- PRODUTOS ----------
+
+def get_products(db, company_id):
+    return db.query(Product).filter(Product.company_id == company_id).all()
+
+
+def register_product(db, company_id, name, price_sale, price_cost, stock_min, sku):
+    prod = Product(
+        company_id=company_id,
         name=name,
         sku=sku,
-        price_retail=price_retail,
-        price_wholesale=price_wholesale,
+        price_retail=price_sale,
+        price_wholesale=price_cost,
         stock=0,
-        stock_min=stock_min,
-        company_id=company_id
+        stock_min=stock_min
     )
-    db.add(product)
+    db.add(prod)
     db.commit()
-    return product
 
-def restock_product(
-    db: Session,
-    company_id: int,
-    product_id: int,
-    quantity: int,
-    unit_cost: float
-):
-    product = (
-        db.query(Product)
-        .filter(
-            Product.id == product_id,
-            Product.company_id == company_id
-        )
-        .first()
-    )
 
-    if not product:
-        raise Exception("Produto não encontrado")
+def restock_product(db, company_id, product_id, qty, cost):
+    prod = db.query(Product).filter(
+        Product.id == product_id,
+        Product.company_id == company_id
+    ).first()
 
-    # Atualiza estoque
-    product.stock += quantity
+    prod.stock += qty
 
-    # Lança despesa automática
     expense = Expense(
-        description=f"Reposição de estoque: {product.name}",
-        amount=quantity * unit_cost,
-        category="Estoque",
         company_id=company_id,
+        description=f"Reposição estoque: {prod.name}",
+        category="Estoque",
+        amount=qty * cost,
         date=datetime.utcnow()
     )
 
     db.add(expense)
     db.commit()
 
-def process_sale(
-    db: Session,
-    company_id: int,
-    product_id: int,
-    quantity: int,
-    kind: str,
-    user_id: int
-):
-    product = (
-        db.query(Product)
-        .filter(
-            Product.id == product_id,
-            Product.company_id == company_id
-        )
-        .first()
-    )
 
-    if not product:
-        raise Exception("Produto não encontrado")
+# ---------- FINANCEIRO ----------
 
-    if product.stock < quantity:
-        raise Exception("Estoque insuficiente")
-
-    price = (
-        product.price_wholesale
-        if kind == "atacado"
-        else product.price_retail
-    )
-
-    sale = Sale(
-        product_id=product.id,
-        quantity=quantity,
-        price=price,
-        kind=kind,
-        user_id=user_id,
+def add_expense(db, company_id, desc, val, cat, date):
+    exp = Expense(
         company_id=company_id,
-        date=datetime.utcnow()
-    )
-
-    product.stock -= quantity
-
-    db.add(sale)
-    db.commit()
-
-def add_expense(
-    db: Session,
-    company_id: int,
-    description: str,
-    amount: float,
-    category: str,
-    date: datetime
-):
-    expense = Expense(
-        description=description,
-        amount=amount,
-        category=category,
-        company_id=company_id,
+        description=desc,
+        category=cat,
+        amount=val,
         date=date
     )
-    db.add(expense)
+    db.add(exp)
     db.commit()
 
-def get_financial_by_range(
-    db: Session,
-    company_id: int,
-    start_date: datetime,
-    end_date: datetime
-):
-    sales = (
-        db.query(
-            Sale.date,
-            Sale.quantity,
-            Sale.price,
-            Product.name.label("product_name")
-        )
-        .join(Product, Product.id == Sale.product_id)
-        .filter(
-            Sale.company_id == company_id,
-            Sale.date.between(start_date, end_date)
-        )
-        .all()
-    )
 
-    expenses = (
-        db.query(
-            Expense.date,
-            Expense.category,
-            Expense.description,
-            Expense.amount
-        )
-        .filter(
-            Expense.company_id == company_id,
-            Expense.date.between(start_date, end_date)
-        )
-        .all()
-    )
+def get_financial_by_range(db, company_id, start, end):
+    sales = db.query(Sale).filter(
+        Sale.company_id == company_id,
+        Sale.date >= start,
+        Sale.date <= end
+    ).all()
 
-    df_sales = pd.DataFrame(sales)
-    df_expenses = pd.DataFrame(expenses)
+    expenses = db.query(Expense).filter(
+        Expense.company_id == company_id,
+        Expense.date >= start,
+        Expense.date <= end
+    ).all()
 
-    return df_sales, df_expenses
+    df_sales = pd.DataFrame([{
+        "date": s.date,
+        "product_id": s.product_id,
+        "quantity": s.quantity,
+        "price": s.price,
+        "user_id": s.user_id
+    } for s in sales])
+
+    df_exp = pd.DataFrame([{
+        "date": e.date,
+        "description": e.description,
+        "category": e.category,
+        "amount": e.amount
+    } for e in expenses])
+
+    return df_sales, df_exp
+
