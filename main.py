@@ -286,6 +286,8 @@ def add_to_cart(product):
 def generate_receipt_80mm(cart, total, payment):
     pdf = FPDF("P", "mm", (80, 200))
     pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=5)
+
     pdf.set_font("Helvetica", "B", 12)
     pdf.cell(0, 6, "PEEGFLOW", ln=True, align="C")
     pdf.set_font("Helvetica", "", 9)
@@ -293,22 +295,31 @@ def generate_receipt_80mm(cart, total, payment):
     pdf.ln(3)
 
     for item in cart:
-        pdf.cell(0, 5, item["name"][:32], ln=True)
+        name = (item.get("name") or "")[:32]
+        qty = int(item.get("qty", 1))
+        price = float(item.get("price", 0.0))
+
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.multi_cell(0, 4, name)
+
+        pdf.set_font("Helvetica", "", 9)
         pdf.cell(
             0, 5,
-            f'{item["qty"]} x R$ {item["price"]:.2f} = R$ {item["price"] * item["qty"]:.2f}',
+            f'{qty} x R$ {price:.2f} = R$ {(price * qty):.2f}',
             ln=True
         )
 
     pdf.ln(2)
     pdf.set_font("Helvetica", "B", 11)
     pdf.cell(0, 6, f"TOTAL: R$ {total:.2f}", ln=True)
+
     pdf.set_font("Helvetica", "", 9)
     pdf.cell(0, 5, f"Pagamento: {payment}", ln=True)
     pdf.cell(0, 5, datetime.now().strftime("%d/%m/%Y %H:%M"), ln=True)
 
-    buffer = io.BytesIO()
-    pdf.output(buffer)
+    # ✅ jeito correto: gerar bytes
+    pdf_bytes = pdf.output(dest="S").encode("latin-1")
+    buffer = io.BytesIO(pdf_bytes)
     buffer.seek(0)
     return buffer
 
