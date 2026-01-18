@@ -466,25 +466,25 @@ else:
 discount_amount = min(discount_amount, subtotal)
 total = subtotal - discount_amount
 
-            receipt_html += f"""
-            <div class="receipt-total-section">
-                <div class="receipt-item">
-                    <span>Subtotal</span>
-                    <span>{brl(subtotal)}</span>
-                </div>
-                <div class="receipt-item">
-                    <span>Desconto</span>
-                    <span>- {brl(discount_amount)}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;margin-top:10px;">
-                    <strong>TOTAL</strong>
-                    <strong>{brl(total)}</strong>
-                </div>
-            </div>
-            </div>
-            """
+receipt_html += f"""
+<div class="receipt-total-section">
+  <div class="receipt-item">
+    <span>Subtotal</span>
+    <span>{brl(subtotal)}</span>
+  </div>
+  <div class="receipt-item">
+    <span>Desconto</span>
+    <span>- {brl(discount_amount)}</span>
+  </div>
+  <div style="display:flex;justify-content:space-between;margin-top:10px;">
+    <strong>TOTAL</strong>
+    <strong>{brl(total)}</strong>
+  </div>
+</div>
+</div>
+"""
 
-            st.markdown(receipt_html, unsafe_allow_html=True)
+st.markdown(receipt_html, unsafe_allow_html=True)
 
             # -------- CONTROLE DE ITENS --------
             st.subheader("Itens no Cupom")
