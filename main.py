@@ -564,7 +564,7 @@ elif choice == "📦 Estoque":
 
     # --- ABA 2: REPOR ESTOQUE (ENTRADA) ---
     with tab_repor:
-    c_r1, c_r2 = st.columns([1, 1])
+        c_r1, c_r2 = st.columns([1, 1])
     with c_r1:
         st.markdown("### 📥 Entrada de Mercadoria")
         st.info("Esta ação aumentará o estoque e lançará uma despesa no financeiro automaticamente.")
