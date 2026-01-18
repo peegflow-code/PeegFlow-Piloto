@@ -338,13 +338,6 @@ if choice == "🛒 Checkout (PDV)":
 
     if "cart" not in st.session_state:
         st.session_state["cart"] = []
-
-    if "discount_type" not in st.session_state:
-        st.session_state["discount_type"] = "R$"
-
-    if "discount_value" not in st.session_state:
-        st.session_state["discount_value"] = 0.0
-
     if "last_receipt" not in st.session_state:
         st.session_state["last_receipt"] = None
 
@@ -352,209 +345,183 @@ if choice == "🛒 Checkout (PDV)":
 
     # ---------------- PRODUTOS ----------------
     with col_prod:
-        search = st.text_input("🔍 Pesquisar produto ou código de barras...")
+        search = st.text_input("🔍 Pesquisar produto ou código de barras...", placeholder="Ex: iPhone...")
         prods = api.get_products(db, cid)
 
         filtered = [
             p for p in prods
-            if search.lower() in (p.name or "").lower()
-            or search.lower() in (p.sku or "").lower()
+            if search.lower() in (getattr(p, "name", "") or "").lower()
+            or search.lower() in (getattr(p, "sku", "") or "").lower()
         ]
 
         p_cols = st.columns(3)
         for i, p in enumerate(filtered):
             with p_cols[i % 3]:
                 st.markdown(f"""
-                <div style="background:white;padding:20px;border-radius:15px;border:1px solid #E0E5F2;text-align:center;">
+                <div style="background:white;padding:20px;border-radius:15px;border:1px solid #E0E5F2;text-align:center;margin-bottom:10px;">
                     <div style="font-size:2rem;">📦</div>
-                    <div style="font-weight:700;">{p.name}</div>
+                    <div style="font-weight:700;color:#1B2559;margin:10px 0;">{p.name}</div>
                     <div style="color:#6366F1;font-weight:800;">{brl(p.price_retail)}</div>
-                    <div style="font-size:0.85rem;color:#64748B;">Estoque: {p.stock}</div>
+                    <div style="color:#64748B;font-size:0.85rem;">SKU: {getattr(p, "sku", "") or "-"}</div>
+                    <div style="color:#64748B;font-size:0.85rem;">Estoque: {p.stock}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
-                qty = st.number_input(
-                    "Qtd",
-                    min_value=1,
-                    step=1,
-                    value=1,
-                    key=f"pdv_qty_{p.id}"
-                )
+                qty = st.number_input("Qtd", min_value=1, step=1, value=1, key=f"pdv_qty_{p.id}")
 
                 if st.button("Adicionar", key=f"add_{p.id}", use_container_width=True):
-                    if qty > p.stock:
-                        st.error("Estoque insuficiente")
+                    # valida estoque antes de adicionar
+                    if int(qty) > int(p.stock):
+                        st.error(f"Estoque insuficiente. Disponível: {p.stock}")
                     else:
                         add_to_cart(p, qty)
                         st.rerun()
 
-   # ---------------- CUPOM ----------------
-with col_receipt:
-    receipt_html = '<div class="receipt-panel">'
-    receipt_html += f'<div class="receipt-title">CUPOM #{datetime.now().strftime("%H%M")}</div>'
+    # ---------------- CUPOM (SEM HTML) ----------------
+    with col_receipt:
+        st.subheader("🧾 Cupom")
 
-    subtotal = 0.0
+        cart = st.session_state["cart"]
 
-    # ---------- ITENS ----------
-    for item in st.session_state["cart"]:
-        price = float(item.get("price", 0))
-        qty = int(item.get("qty", 1))
-        line_total = price * qty
-        subtotal += line_total
+        if not cart:
+            st.info("Carrinho vazio.")
+        else:
+            # ---- Desconto (sempre definido antes de usar) ----
+            st.markdown("### 🏷️ Desconto")
+            d1, d2 = st.columns(2)
 
-        receipt_html += f"""
-        <div class="receipt-item">
-            <span>{item.get("name","")} (x{qty})</span>
-            <span>{brl(line_total)}</span>
-        </div>
-        """
+            with d1:
+                discount_type = st.selectbox("Tipo", ["R$", "%"], key="disc_type")
+            with d2:
+                if discount_type == "%":
+                    discount_value = st.number_input("Valor (%)", min_value=0.0, max_value=100.0, step=1.0, key="disc_val_pct")
+                else:
+                    discount_value = st.number_input("Valor (R$)", min_value=0.0, step=1.0, key="disc_val_brl")
 
-        # TOTALIZAÇÃO (SEM INDENTAÇÃO = MUITO IMPORTANTE)
-        receipt_html += f"""
-<div class="receipt-total-section">
-  <div class="receipt-item">
-    <span style="color:#A3AED0;">Subtotal</span>
-    <span>{brl(subtotal)}</span>
-  </div>
+            # ---- Itens + subtotal ----
+            subtotal = 0.0
+            st.markdown("### 📦 Itens")
 
-  <div class="receipt-item">
-    <span style="color:#A3AED0;">Desconto</span>
-    <span>- {brl(discount_amount)}</span>
-  </div>
+            # loop reverso pra poder remover sem dar bug
+            for idx in range(len(cart) - 1, -1, -1):
+                item = cart[idx]
+                qty = int(item.get("qty", 1))
+                price = float(item.get("price", 0.0))
+                line_total = qty * price
+                subtotal += line_total
 
-  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;">
-    <span style="color:#A3AED0;font-weight:700;font-size:0.9rem;">TOTAL</span>
-    <span class="total-value">{brl(total)}</span>
-  </div>
-</div>
-</div>
-"""
+                row1, row2 = st.columns([0.7, 0.3])
+                with row1:
+                    st.write(f'**{item.get("name","")}**  \nSKU: `{item.get("sku","") or "-"}`')
+                with row2:
+                    st.write(f'**{brl(line_total)}**')
 
-        st.markdown(receipt_html, unsafe_allow_html=True)
+                c1, c2, c3, c4 = st.columns([0.25, 0.25, 0.25, 0.25])
+                if c1.button("➕", key=f"inc_{idx}", use_container_width=True):
+                    item["qty"] = qty + 1
+                    st.rerun()
+                if c2.button("➖", key=f"dec_{idx}", use_container_width=True):
+                    item["qty"] = qty - 1
+                    if item["qty"] <= 0:
+                        cart.pop(idx)
+                    st.rerun()
+                if c3.button("❌", key=f"del_{idx}", use_container_width=True):
+                    cart.pop(idx)
+                    st.rerun()
+                if c4.button("🧹", key=f"clr_{idx}", use_container_width=True):
+                    # zera item (equivale a remover)
+                    cart.pop(idx)
+                    st.rerun()
 
+                st.divider()
 
-          # ---------- DESCONTO ----------
-st.markdown("### 🏷️ Desconto")
+            # ---- calcula desconto ----
+            if discount_type == "%":
+                discount_amount = subtotal * (float(discount_value) / 100.0)
+            else:
+                discount_amount = float(discount_value)
 
-d1, d2 = st.columns(2)
+            discount_amount = min(discount_amount, subtotal)
+            total = subtotal - discount_amount
 
-with d1:
-    st.session_state["discount_type"] = st.selectbox(
-        "Tipo",
-        ["R$", "%"],
-        key="disc_type"
-    )
+            # ---- Quadro de totais (bonitinho, sem HTML) ----
+            with st.container(border=True):
+                t1, t2 = st.columns(2)
+                t1.write("Subtotal")
+                t2.write(f"**{brl(subtotal)}**")
 
-with d2:
-    st.session_state["discount_value"] = st.number_input(
-        "Valor",
-        min_value=0.0,
-        step=1.0,
-        key="disc_val"
-    )
+                t1, t2 = st.columns(2)
+                t1.write("Desconto")
+                t2.write(f"**- {brl(discount_amount)}**")
 
-# cálculo do desconto
-if st.session_state["discount_type"] == "%":
-    discount_amount = subtotal * (st.session_state["discount_value"] / 100)
-else:
-    discount_amount = st.session_state["discount_value"]
+                st.divider()
 
-discount_amount = min(discount_amount, subtotal)
-total = subtotal - discount_amount
+                t1, t2 = st.columns(2)
+                t1.write("TOTAL")
+                t2.markdown(f"## {brl(total)}")
 
-receipt_html += f"""
-<div class="receipt-total-section">
-  <div class="receipt-item">
-    <span>Subtotal</span>
-    <span>{brl(subtotal)}</span>
-  </div>
-  <div class="receipt-item">
-    <span>Desconto</span>
-    <span>- {brl(discount_amount)}</span>
-  </div>
-  <div style="display:flex;justify-content:space-between;margin-top:10px;">
-    <strong>TOTAL</strong>
-    <strong>{brl(total)}</strong>
-  </div>
-</div>
-</div>
-"""
+            payment = st.radio("Pagamento", ["PIX", "Dinheiro", "Cartão"], horizontal=True, key="pdv_payment")
 
-st.markdown(receipt_html, unsafe_allow_html=True)
+            # -------- FINALIZAR VENDA --------
+            if st.button("FINALIZAR VENDA (F10)", type="primary", use_container_width=True):
+                # valida estoque real antes de concluir
+                errors = []
+                for item in cart:
+                    prod = db.query(Product).filter(Product.id == item["id"], Product.company_id == cid).first()
+                    if not prod:
+                        errors.append(f'Produto não encontrado: {item.get("name","")}')
+                        continue
+                    if int(item["qty"]) > int(prod.stock):
+                        errors.append(f'Estoque insuficiente para {prod.name}. Disponível: {prod.stock}')
 
-# -------- CONTROLE DE ITENS --------
-st.subheader("Itens no Cupom")
+                if errors:
+                    for e in errors:
+                        st.error(e)
+                else:
+                    for item in cart:
+                        api.process_sale(
+                            db,
+                            item["id"],
+                            int(item["qty"]),
+                            "varejo",
+                            st.session_state["user_id"],
+                            cid
+                        )
 
-for idx in range(len(st.session_state["cart"]) - 1, -1, -1):
-    item = st.session_state["cart"][idx]
-    c1, c2, c3, c4, c5 = st.columns([5, 2, 2, 2, 2])
+                    st.session_state["last_receipt"] = {
+                        "cart": [dict(x) for x in cart],
+                        "total": total,
+                        "subtotal": subtotal,
+                        "discount_amount": discount_amount,
+                        "payment": payment
+                    }
 
-    c1.write(item.get("name", ""))
-    c2.write(f'Qtd: {int(item.get("qty", 1))}')
+                    st.session_state["cart"] = []
+                    st.success("Venda concluída!")
+                    st.rerun()
 
-    if c3.button("➕", key=f"inc_{idx}"):
-        item["qty"] = int(item.get("qty", 1)) + 1
-        st.rerun()
+            # -------- IMPRIMIR ÚLTIMO CUPOM --------
+            last = st.session_state.get("last_receipt")
+            if last is not None:
+                if st.button("🧾 Imprimir Último Cupom", use_container_width=True):
+                    pdf = generate_receipt_80mm(
+                        last["cart"],
+                        last["total"],
+                        last["payment"],
+                        discount_amount=last["discount_amount"],
+                        subtotal=last["subtotal"]
+                    )
+                    st.download_button(
+                        "📥 Baixar Último Cupom (80mm)",
+                        pdf,
+                        file_name="cupom_ultimo.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
 
-    if c4.button("➖", key=f"dec_{idx}"):
-        item["qty"] = int(item.get("qty", 1)) - 1
-        if item["qty"] <= 0:
-            st.session_state["cart"].pop(idx)
-        st.rerun()
-
-    if c5.button("❌", key=f"del_{idx}"):
-        st.session_state["cart"].pop(idx)
-        st.rerun()
-
-    payment = st.radio("Pagamento", ["PIX", "Dinheiro", "Cartão"], horizontal=True, key="pdv_payment")
-
-    # -------- FINALIZAR VENDA --------
-    if st.button("FINALIZAR VENDA", type="primary", use_container_width=True):
-        for item in st.session_state["cart"]:
-            api.process_sale(
-                db,
-                item["id"],
-                int(item.get("qty", 1)),
-                "varejo",
-                st.session_state["user_id"],
-                cid
-            )
-
-        # guarda o último cupom (antes de limpar)
-        st.session_state["last_receipt"] = {
-            "cart": [dict(x) for x in st.session_state["cart"]],
-            "total": total,
-            "subtotal": subtotal,
-            "discount_amount": discount_amount,
-            "payment": payment
-        }
-
-        st.session_state["cart"] = []
-        st.success("Venda concluída!")
-        st.rerun()
-
-    # -------- IMPRIMIR ÚLTIMO CUPOM --------
-    if st.session_state.get("last_receipt") is not None:
-        if st.button("🧾 Imprimir Último Cupom", use_container_width=True):
-            last = st.session_state["last_receipt"]
-            pdf = generate_receipt_80mm(
-                last["cart"],
-                last["total"],
-                last["payment"],
-                discount_amount=last["discount_amount"],
-                subtotal=last["subtotal"]
-            )
-            st.download_button(
-                "📥 Baixar Cupom (80mm)",
-                pdf,
-                file_name="cupom_ultimo.pdf",
-                mime="application/pdf",
-                use_container_width=True
-            )
-
-    if st.button("🗑️ Limpar Carrinho", use_container_width=True):
-        st.session_state["cart"] = []
-        st.rerun()
+            if st.button("🗑️ Limpar Carrinho", use_container_width=True):
+                st.session_state["cart"] = []
+                st.rerun()
 
 # -------------------------
 # FINANCEIRO (R$)
