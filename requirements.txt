@@ -3,4 +3,5 @@ sqlalchemy
 psycopg2-binary
 pandas
 plotly
-werkzeug
+bcrypt
+fpdf
