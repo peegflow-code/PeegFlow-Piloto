@@ -437,28 +437,34 @@ with col_receipt:
         st.markdown(receipt_html, unsafe_allow_html=True)
 
 
-            # ---------- DESCONTO ----------
-            st.markdown("### 🏷️ Desconto")
-                d1, d2 = st.columns(2)
-            with d1:
-                st.session_state["discount_type"] = st.selectbox(
-                    "Tipo", ["R$", "%"], key="disc_type"
-                )
-            with d2:
-                st.session_state["discount_value"] = st.number_input(
-                    "Valor",
-                    min_value=0.0,
-                    step=1.0,
-                    key="disc_val"
-                )
+          # ---------- DESCONTO ----------
+st.markdown("### 🏷️ Desconto")
 
-            if st.session_state["discount_type"] == "%":
-                discount_amount = subtotal * (st.session_state["discount_value"] / 100)
-            else:
-                discount_amount = st.session_state["discount_value"]
+d1, d2 = st.columns(2)
 
-            discount_amount = min(discount_amount, subtotal)
-            total = subtotal - discount_amount
+with d1:
+    st.session_state["discount_type"] = st.selectbox(
+        "Tipo",
+        ["R$", "%"],
+        key="disc_type"
+    )
+
+with d2:
+    st.session_state["discount_value"] = st.number_input(
+        "Valor",
+        min_value=0.0,
+        step=1.0,
+        key="disc_val"
+    )
+
+# cálculo do desconto
+if st.session_state["discount_type"] == "%":
+    discount_amount = subtotal * (st.session_state["discount_value"] / 100)
+else:
+    discount_amount = st.session_state["discount_value"]
+
+discount_amount = min(discount_amount, subtotal)
+total = subtotal - discount_amount
 
             receipt_html += f"""
             <div class="receipt-total-section">
