@@ -483,13 +483,14 @@ receipt_html += f"""
 st.markdown(receipt_html, unsafe_allow_html=True)
 
 # -------- CONTROLE DE ITENS --------
-    st.subheader("Itens no Cupom")
-    for idx in range(len(st.session_state["cart"]) - 1, -1, -1):
-        item = st.session_state["cart"][idx]
-        c1, c2, c3, c4, c5 = st.columns([5, 2, 2, 2, 2])
+st.subheader("Itens no Cupom")
 
-        c1.write(item.get("name", ""))
-        c2.write(f'Qtd: {int(item.get("qty", 1))}')
+for idx in range(len(st.session_state["cart"]) - 1, -1, -1):
+    item = st.session_state["cart"][idx]
+    c1, c2, c3, c4, c5 = st.columns([5, 2, 2, 2, 2])
+
+    c1.write(item.get("name", ""))
+    c2.write(f'Qtd: {int(item.get("qty", 1))}')
 
         if c3.button("➕", key=f"inc_{idx}"):
             item["qty"] = int(item.get("qty", 1)) + 1
