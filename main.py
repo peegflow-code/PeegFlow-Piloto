@@ -482,78 +482,78 @@ receipt_html += f"""
 
 st.markdown(receipt_html, unsafe_allow_html=True)
 
-            # -------- CONTROLE DE ITENS --------
-            st.subheader("Itens no Cupom")
-            for idx in range(len(st.session_state["cart"]) - 1, -1, -1):
-                item = st.session_state["cart"][idx]
-                c1, c2, c3, c4, c5 = st.columns([5, 2, 2, 2, 2])
+# -------- CONTROLE DE ITENS --------
+    st.subheader("Itens no Cupom")
+    for idx in range(len(st.session_state["cart"]) - 1, -1, -1):
+        item = st.session_state["cart"][idx]
+        c1, c2, c3, c4, c5 = st.columns([5, 2, 2, 2, 2])
 
-                c1.write(item["name"])
-                c2.write(f'Qtd: {item["qty"]}')
+        c1.write(item.get("name", ""))
+        c2.write(f'Qtd: {int(item.get("qty", 1))}')
 
-                if c3.button("➕", key=f"inc_{idx}"):
-                    item["qty"] += 1
-                    st.rerun()
+        if c3.button("➕", key=f"inc_{idx}"):
+            item["qty"] = int(item.get("qty", 1)) + 1
+            st.rerun()
 
-                if c4.button("➖", key=f"dec_{idx}"):
-                    item["qty"] -= 1
-                    if item["qty"] <= 0:
-                        st.session_state["cart"].pop(idx)
-                    st.rerun()
+        if c4.button("➖", key=f"dec_{idx}"):
+            item["qty"] = int(item.get("qty", 1)) - 1
+            if item["qty"] <= 0:
+                st.session_state["cart"].pop(idx)
+            st.rerun()
 
-                if c5.button("❌", key=f"del_{idx}"):
-                    st.session_state["cart"].pop(idx)
-                    st.rerun()
+        if c5.button("❌", key=f"del_{idx}"):
+            st.session_state["cart"].pop(idx)
+            st.rerun()
 
-            payment = st.radio("Pagamento", ["PIX", "Dinheiro", "Cartão"], horizontal=True)
+    payment = st.radio("Pagamento", ["PIX", "Dinheiro", "Cartão"], horizontal=True, key="pdv_payment")
 
-            # -------- FINALIZAR VENDA --------
-            if st.button("FINALIZAR VENDA", type="primary", use_container_width=True):
-                for item in st.session_state["cart"]:
-                    api.process_sale(
-                        db,
-                        item["id"],
-                        item["qty"],
-                        "varejo",
-                        st.session_state["user_id"],
-                        cid
-                    )
+    # -------- FINALIZAR VENDA --------
+    if st.button("FINALIZAR VENDA", type="primary", use_container_width=True):
+        for item in st.session_state["cart"]:
+            api.process_sale(
+                db,
+                item["id"],
+                int(item.get("qty", 1)),
+                "varejo",
+                st.session_state["user_id"],
+                cid
+            )
 
-                st.session_state["last_receipt"] = {
-                    "cart": [dict(x) for x in st.session_state["cart"]],
-                    "total": total,
-                    "subtotal": subtotal,
-                    "discount_amount": discount_amount,
-                    "payment": payment
-                }
+        # guarda o último cupom (antes de limpar)
+        st.session_state["last_receipt"] = {
+            "cart": [dict(x) for x in st.session_state["cart"]],
+            "total": total,
+            "subtotal": subtotal,
+            "discount_amount": discount_amount,
+            "payment": payment
+        }
 
-                st.session_state["cart"] = []
-                st.success("Venda concluída!")
-                st.rerun()
+        st.session_state["cart"] = []
+        st.success("Venda concluída!")
+        st.rerun()
 
-            # -------- IMPRIMIR ÚLTIMO CUPOM --------
-            if st.session_state["last_receipt"]:
-                if st.button("🧾 Imprimir Último Cupom", use_container_width=True):
-                    last = st.session_state["last_receipt"]
-                    pdf = generate_receipt_80mm(
-                        last["cart"],
-                        last["total"],
-                        last["payment"],
-                        discount_amount=last["discount_amount"],
-                        subtotal=last["subtotal"]
-                    )
-                    st.download_button(
-                        "📥 Baixar Cupom (80mm)",
-                        pdf,
-                        file_name="cupom_ultimo.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+    # -------- IMPRIMIR ÚLTIMO CUPOM --------
+    if st.session_state.get("last_receipt") is not None:
+        if st.button("🧾 Imprimir Último Cupom", use_container_width=True):
+            last = st.session_state["last_receipt"]
+            pdf = generate_receipt_80mm(
+                last["cart"],
+                last["total"],
+                last["payment"],
+                discount_amount=last["discount_amount"],
+                subtotal=last["subtotal"]
+            )
+            st.download_button(
+                "📥 Baixar Cupom (80mm)",
+                pdf,
+                file_name="cupom_ultimo.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
 
-            if st.button("🗑️ Limpar Carrinho", use_container_width=True):
-                st.session_state["cart"] = []
-                st.rerun()
-
+    if st.button("🗑️ Limpar Carrinho", use_container_width=True):
+        st.session_state["cart"] = []
+        st.rerun()
 
 # -------------------------
 # FINANCEIRO (R$)
