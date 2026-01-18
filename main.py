@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import base64
 import io
 from fpdf import FPDF
+import textwrap
 
 # -------------------------
 # Helpers
@@ -387,28 +388,54 @@ if choice == "🛒 Checkout (PDV)":
                         add_to_cart(p, qty)
                         st.rerun()
 
-    # ---------------- CUPOM ----------------
-    with col_receipt:
-        receipt_html = '<div class="receipt-panel">'
-        receipt_html += f'<div class="receipt-title">CUPOM #{datetime.now().strftime("%H%M")}</div>'
+   # ---------------- CUPOM ----------------
+with col_receipt:
+    receipt_html = '<div class="receipt-panel">'
+    receipt_html += f'<div class="receipt-title">CUPOM #{datetime.now().strftime("%H%M")}</div>'
 
-        subtotal = 0.0
+    subtotal = 0.0
 
-        if not st.session_state["cart"]:
-            receipt_html += '<div style="text-align:center;color:#4B5563;margin-top:60px;">Carrinho vazio</div>'
-            receipt_html += '</div>'
-            st.markdown(receipt_html, unsafe_allow_html=True)
-        else:
-            for item in st.session_state["cart"]:
-                line_total = item["price"] * item["qty"]
-                subtotal += line_total
+    if not st.session_state["cart"]:
+        receipt_html += '<div style="text-align:center;color:#4B5563;margin-top:60px;">Carrinho vazio</div>'
+        receipt_html += '</div>'
+        st.markdown(receipt_html, unsafe_allow_html=True)
 
-                receipt_html += f"""
-                <div class="receipt-item">
-                    <span>{item["name"]} (x{item["qty"]})</span>
-                    <span>{brl(line_total)}</span>
-                </div>
-                """
+    else:
+        # ITENS DO CUPOM
+        for item in st.session_state["cart"]:
+            line_total = float(item["price"]) * int(item["qty"])
+            subtotal += line_total
+
+            receipt_html += f"""
+<div class="receipt-item">
+  <span>{item["name"]} (x{item["qty"]})</span>
+  <span>{brl(line_total)}</span>
+</div>
+"""
+
+        # TOTALIZAÇÃO (SEM INDENTAÇÃO = MUITO IMPORTANTE)
+        receipt_html += f"""
+<div class="receipt-total-section">
+  <div class="receipt-item">
+    <span style="color:#A3AED0;">Subtotal</span>
+    <span>{brl(subtotal)}</span>
+  </div>
+
+  <div class="receipt-item">
+    <span style="color:#A3AED0;">Desconto</span>
+    <span>- {brl(discount_amount)}</span>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;">
+    <span style="color:#A3AED0;font-weight:700;font-size:0.9rem;">TOTAL</span>
+    <span class="total-value">{brl(total)}</span>
+  </div>
+</div>
+</div>
+"""
+
+        st.markdown(receipt_html, unsafe_allow_html=True)
+
 
             # ---------- DESCONTO ----------
             st.markdown("### 🏷️ Desconto")
