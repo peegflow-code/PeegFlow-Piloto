@@ -564,24 +564,38 @@ elif choice == "📦 Estoque":
 
     # --- ABA 2: REPOR ESTOQUE (ENTRADA) ---
     with tab_repor:
-        c_r1, c_r2 = st.columns([1, 1])
-        with c_r1:
-            st.markdown("### 📥 Entrada de Mercadoria")
-            st.info("Esta ação aumentará o estoque e lançará uma despesa no financeiro automaticamente.")
-            
+    c_r1, c_r2 = st.columns([1, 1])
+    with c_r1:
+        st.markdown("### 📥 Entrada de Mercadoria")
+        st.info("Esta ação aumentará o estoque e lançará uma despesa no financeiro automaticamente.")
+
+        prods = api.get_products(db, cid)
+
+        if not prods:
+            st.warning("Nenhum produto cadastrado. Cadastre um produto na aba ✨ Novo Produto para poder repor estoque.")
+        else:
             with st.form("form_repor"):
-                # Selectbox com ID oculto visualmente mas útil para lógica
                 prod_options = {f"{p.sku} - {p.name} (Atual: {p.stock})": p.id for p in prods}
-                selected_label = st.selectbox("Selecione o Produto", list(prod_options.keys()))
-                selected_id = prod_options[selected_label]
-                
+
+                selected_label = st.selectbox("Selecione o Produto", options=list(prod_options.keys()))
+                selected_id = prod_options.get(selected_label)
+
                 r_qty = st.number_input("Quantidade a Adicionar", min_value=1, step=1)
-                r_cost = st.number_input("Custo Unitário de Compra (€)", min_value=0.01, format="%.2f", help="Quanto você pagou por cada unidade ao fornecedor?")
-                
+                r_cost = st.number_input(
+                    "Custo Unitário de Compra (R$)",
+                    min_value=0.01,
+                    format="%.2f",
+                    help="Quanto você pagou por cada unidade ao fornecedor?"
+                )
+
                 if st.form_submit_button("✅ Confirmar Entrada"):
-                    api.restock_product(db, cid, selected_id, r_qty, r_cost)
-                    st.success("Estoque atualizado e Custo lançado no Financeiro!")
-                    st.rerun()
+                    ok, msg = api.restock_product(db, cid, selected_id, r_qty, r_cost)
+                    if ok:
+                        st.success("Estoque atualizado e custo lançado no Financeiro!")
+                        st.rerun()
+                    else:
+                        st.error(msg)
+
 
     # --- ABA 3: CADASTRAR NOVO PRODUTO ---
     with tab_novo:
