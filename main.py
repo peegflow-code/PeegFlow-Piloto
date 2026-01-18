@@ -395,23 +395,19 @@ with col_receipt:
 
     subtotal = 0.0
 
-    if not st.session_state["cart"]:
-        receipt_html += '<div style="text-align:center;color:#4B5563;margin-top:60px;">Carrinho vazio</div>'
-        receipt_html += '</div>'
-        st.markdown(receipt_html, unsafe_allow_html=True)
+    # ---------- ITENS ----------
+    for item in st.session_state["cart"]:
+        price = float(item.get("price", 0))
+        qty = int(item.get("qty", 1))
+        line_total = price * qty
+        subtotal += line_total
 
-    else:
-        # ITENS DO CUPOM
-        for item in st.session_state["cart"]:
-            line_total = float(item["price"]) * int(item["qty"])
-            subtotal += line_total
-
-            receipt_html += f"""
-<div class="receipt-item">
-  <span>{item["name"]} (x{item["qty"]})</span>
-  <span>{brl(line_total)}</span>
-</div>
-"""
+        receipt_html += f"""
+        <div class="receipt-item">
+            <span>{item.get("name","")} (x{qty})</span>
+            <span>{brl(line_total)}</span>
+        </div>
+        """
 
         # TOTALIZAÇÃO (SEM INDENTAÇÃO = MUITO IMPORTANTE)
         receipt_html += f"""
