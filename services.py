@@ -1,13 +1,13 @@
 # services.py
-from sqlalchemy.orm import Session
-from models import User, Company, Product, Sale, Expense
-from datetime import datetime
 import bcrypt
 import pandas as pd
+from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
 from sqlalchemy import func
+from models import User, Product, Sale, Expense, Company
 
 # =========================
-# 🔐 SEGURANÇA DE SENHA
+# 🔐 SEGURANÇA / USUÁRIOS
 # =========================
 
 def hash_password(password: str) -> str:
@@ -16,111 +16,87 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, hashed: str) -> bool:
     return bcrypt.checkpw(password.encode(), hashed.encode())
 
-# =========================
-# 👤 AUTH
-# =========================
-
 def authenticate(db: Session, username: str, password: str):
     user = db.query(User).filter(User.username == username).first()
     if user and verify_password(password, user.password_hash):
         return user
     return None
 
-# =========================
-# 🚀 BOOTSTRAP INICIAL
-# =========================
-
 def create_initial_data(db: Session):
-    """
-    Bootstrap seguro:
-    - cria empresa se não existir
-    - cria admin se não existir
-    - corrige hash antigo automaticamente (SHA256 → bcrypt)
-    """
-
-    # Empresa
-    company = db.query(Company).filter(Company.id == 1).first()
-    if not company:
-        company = Company(
-            id=1,
-            name="Empresa Piloto",
-            license_key="PEEGFLOW-001",
-            is_active=True
-        )
+    if not db.query(Company).filter_by(id=1).first():
+        company = Company(id=1, name="Empresa Principal", license_key="MASTER")
         db.add(company)
         db.commit()
 
-    # Admin
-    admin = db.query(User).filter(User.username == "admin").first()
-
-    if not admin:
-        # cria admin novo
+    if not db.query(User).filter_by(username="admin").first():
         admin = User(
             username="admin",
             password_hash=hash_password("admin123"),
             role="admin",
-            company_id=company.id
+            company_id=1
         )
         db.add(admin)
         db.commit()
 
-    else:
-        # 🔁 garante que a senha esteja em bcrypt
-        try:
-            import bcrypt
-            bcrypt.checkpw(b"test", admin.password_hash.encode())
-        except Exception:
-            # hash antigo → atualiza
-            admin.password_hash = hash_password("admin123")
-            db.commit()
-
-
 # =========================
-# 👥 CRUD DE USUÁRIOS
-# =========================
-
-def list_users(db: Session, company_id: int):
-    return db.query(User).filter(User.company_id == company_id).all()
-
-def create_user(db: Session, company_id: int, username: str, password: str, role: str):
-    if db.query(User).filter(User.username == username).first():
-        return False, "Usuário já existe"
-
-    user = User(
-        username=username,
-        password_hash=hash_password(password),
-        role=role,
-        company_id=company_id
-    )
-    db.add(user)
-    db.commit()
-    return True, "Usuário criado"
-
-def change_password(db: Session, user_id: int, new_password: str):
-    user = db.query(User).get(user_id)
-    user.password_hash = hash_password(new_password)
-    db.commit()
-
-# =========================
-# 🔐 PERMISSÕES
-# =========================
-
-def is_admin(user):
-    return user.role in ["admin", "superadmin"]
-
-# =========================
-# 📦 PRODUTOS / VENDAS
+# 📦 PRODUTOS / ESTOQUE
 # =========================
 
 def get_products(db: Session, company_id: int):
     return db.query(Product).filter(Product.company_id == company_id).all()
 
-def process_sale(db: Session, product_id: int, qty: int, kind: str, user_id: int, company_id: int):
-    product = db.query(Product).filter(Product.id == product_id, Product.company_id == company_id).first()
-    if not product or product.stock < qty:
+def register_product(db: Session, company_id: int, name, price_retail, price_wholesale, stock_min, sku):
+    prod = Product(
+        name=name,
+        price_retail=price_retail,
+        price_wholesale=price_wholesale,
+        stock=0,
+        stock_min=stock_min,
+        sku=sku,
+        company_id=company_id
+    )
+    db.add(prod)
+    db.commit()
+
+def delete_product(db: Session, product_id: int, company_id: int):
+    prod = db.query(Product).filter_by(id=product_id, company_id=company_id).first()
+    if prod:
+        db.delete(prod)
+        db.commit()
+
+def restock_product(db: Session, company_id: int, product_id: int, qty: int, cost_unit: float):
+    product = db.query(Product).filter_by(id=product_id, company_id=company_id).first()
+    if not product:
         return False
 
+    product.stock += qty
+
+    expense = Expense(
+        description=f"Reposição {product.name}",
+        amount=qty * cost_unit,
+        category="CMV",
+        company_id=company_id,
+        date=datetime.now()
+    )
+    db.add(expense)
+    db.commit()
+    return True
+
+# =========================
+# 🛒 VENDAS / PDV
+# =========================
+
+def process_sale(db: Session, product_id: int, qty: int, kind: str, user_id: int, company_id: int):
+    product = db.query(Product).filter_by(id=product_id, company_id=company_id).first()
+
+    if not product:
+        return False, "Produto não encontrado"
+
+    if product.stock < qty:
+        return False, f"Estoque insuficiente ({product.stock})"
+
     product.stock -= qty
+
     sale = Sale(
         product_id=product.id,
         quantity=qty,
@@ -132,85 +108,48 @@ def process_sale(db: Session, product_id: int, qty: int, kind: str, user_id: int
     )
     db.add(sale)
     db.commit()
-    return True
+    return True, "Venda realizada"
 
 # =========================
 # 💰 FINANCEIRO
 # =========================
 
-def add_expense(db: Session, company_id: int, desc: str, amount: float, category: str, date: datetime):
-    db.add(Expense(
+def add_expense(db: Session, company_id: int, desc, amount, category, date):
+    exp = Expense(
         description=desc,
         amount=amount,
         category=category,
-        date=date,
-        company_id=company_id
-    ))
+        company_id=company_id,
+        date=date
+    )
+    db.add(exp)
     db.commit()
 
-def get_financial_by_range(
-    db: Session,
-    company_id: int,
-    start_date: datetime,
-    end_date: datetime
-):
-    # Ajuste de datas
-    if end_date.hour == 0 and end_date.minute == 0:
-        end_date = end_date.replace(hour=23, minute=59, second=59)
+def get_financial_by_range(db: Session, company_id: int, start_date, end_date):
+    sales_q = db.query(
+        Sale.date,
+        Sale.quantity,
+        Sale.price,
+        Product.name.label("product_name")
+    ).join(Product).filter(
+        Sale.company_id == company_id,
+        Sale.date >= start_date,
+        Sale.date <= end_date
+    ).statement
 
-    # --- VENDAS ---
-    sales_q = (
-        db.query(
-            Sale.date.label("date"),
-            Sale.quantity.label("quantity"),
-            Sale.price.label("price"),
-            Product.name.label("product_name")
-        )
-        .select_from(Sale)               # ✅ ANCORAGEM EXPLÍCITA
-        .join(Product, Product.id == Sale.product_id)
-        .filter(
-            Sale.company_id == company_id,
-            Sale.date >= start_date,
-            Sale.date <= end_date
-        )
-    )
+    expense_q = db.query(
+        Expense.date,
+        Expense.category,
+        Expense.description,
+        Expense.amount
+    ).filter(
+        Expense.company_id == company_id,
+        Expense.date >= start_date,
+        Expense.date <= end_date
+    ).statement
 
-    # --- DESPESAS ---
-    expenses_q = (
-        db.query(
-            Expense.date.label("date"),
-            Expense.description.label("description"),
-            Expense.category.label("category"),
-            Expense.amount.label("amount")
-        )
-        .filter(
-            Expense.company_id == company_id,
-            Expense.date >= start_date,
-            Expense.date <= end_date
-        )
-    )
+    df_sales = pd.read_sql(sales_q, db.bind)
+    df_exp = pd.read_sql(expense_q, db.bind)
+    return df_sales, df_exp
 
-    # Pandas
-    df_sales = pd.read_sql(sales_q.statement, db.bind)
-    df_expenses = pd.read_sql(expenses_q.statement, db.bind)
-
-    return df_sales, df_expenses
-
-def delete_product(db: Session, company_id: int, product_id: int):
-    product = db.query(Product).filter(
-        Product.id == product_id,
-        Product.company_id == company_id
-    ).first()
-
-    if not product:
-        return False, "Produto não encontrado"
-
-    # Verificação de segurança: não excluir se houver vendas
-    has_sales = db.query(Sale).filter(Sale.product_id == product_id).first()
-    if has_sales:
-        return False, "Produto possui vendas registradas"
-
-    db.delete(product)
-    db.commit()
-    return True, "Produto excluído com sucesso"
 
