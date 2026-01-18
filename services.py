@@ -1,104 +1,109 @@
+import hashlib
 from sqlalchemy.orm import Session
-from werkzeug.security import check_password_hash
-from models import User, Product, Sale, Expense
-import pandas as pd
 from datetime import datetime
+from models import User, Company, Product, Sale, Expense
 
-# ---------- AUTH ----------
+# ------------------ SEGURANÇA ------------------
 
-def authenticate_user(db: Session, username: str, password: str):
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def authenticate(db: Session, username: str, password: str):
     user = db.query(User).filter(User.username == username).first()
-    if user and check_password_hash(user.password_hash, password):
+    if user and user.password_hash == hash_password(password):
         return user
     return None
 
+def create_initial_data(db: Session):
+    company = db.query(Company).filter(Company.id == 1).first()
+    if not company:
+        company = Company(
+            id=1,
+            name="Empresa Inicial",
+            license_key="LIC-001",
+            is_active=True
+        )
+        db.add(company)
+        db.commit()
 
-def require_admin(user):
-    if user.role != "admin":
-        raise PermissionError("Acesso restrito a administradores")
+    admin = db.query(User).filter(User.username == "admin").first()
+    if not admin:
+        admin = User(
+            username="admin",
+            password_hash=hash_password("admin123"),
+            role="admin",
+            company_id=1
+        )
+        db.add(admin)
+        db.commit()
 
+# ------------------ USUÁRIOS ------------------
 
-# ---------- PRODUTOS ----------
+def list_users(db: Session, company_id: int):
+    return db.query(User).filter(User.company_id == company_id).all()
 
-def get_products(db, company_id):
-    return db.query(Product).filter(Product.company_id == company_id).all()
-
-
-def register_product(db, company_id, name, price_sale, price_cost, stock_min, sku):
-    prod = Product(
-        company_id=company_id,
-        name=name,
-        sku=sku,
-        price_retail=price_sale,
-        price_wholesale=price_cost,
-        stock=0,
-        stock_min=stock_min
+def create_user(db: Session, company_id: int, username: str, password: str, role: str):
+    user = User(
+        username=username,
+        password_hash=hash_password(password),
+        role=role,
+        company_id=company_id
     )
-    db.add(prod)
+    db.add(user)
     db.commit()
 
+def delete_user(db: Session, user_id: int, company_id: int):
+    user = db.query(User).filter(
+        User.id == user_id,
+        User.company_id == company_id
+    ).first()
+    if user:
+        db.delete(user)
+        db.commit()
 
-def restock_product(db, company_id, product_id, qty, cost):
-    prod = db.query(Product).filter(
+def change_password(db: Session, user_id: int, new_password: str):
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        user.password_hash = hash_password(new_password)
+        db.commit()
+
+# ------------------ PRODUTOS / VENDAS ------------------
+
+def get_products(db: Session, company_id: int):
+    return db.query(Product).filter(Product.company_id == company_id).all()
+
+def register_product(db: Session, company_id: int, name, price_retail, price_wholesale, stock_min, sku):
+    p = Product(
+        name=name,
+        price_retail=price_retail,
+        price_wholesale=price_wholesale,
+        stock=0,
+        stock_min=stock_min,
+        sku=sku,
+        company_id=company_id
+    )
+    db.add(p)
+    db.commit()
+
+def process_sale(db: Session, product_id, qty, kind, user_id, company_id):
+    product = db.query(Product).filter(
         Product.id == product_id,
         Product.company_id == company_id
     ).first()
-
-    prod.stock += qty
-
-    expense = Expense(
+    if not product or product.stock < qty:
+        return False
+    product.stock -= qty
+    sale = Sale(
+        product_id=product.id,
+        quantity=qty,
+        price=product.price_retail,
+        kind=kind,
+        user_id=user_id,
         company_id=company_id,
-        description=f"Reposição estoque: {prod.name}",
-        category="Estoque",
-        amount=qty * cost,
-        date=datetime.utcnow()
+        date=datetime.now()
     )
-
-    db.add(expense)
+    db.add(sale)
     db.commit()
+    return True
 
-
-# ---------- FINANCEIRO ----------
-
-def add_expense(db, company_id, desc, val, cat, date):
-    exp = Expense(
-        company_id=company_id,
-        description=desc,
-        category=cat,
-        amount=val,
-        date=date
-    )
-    db.add(exp)
-    db.commit()
-
-
-def get_financial_by_range(db, company_id, start, end):
-    sales = db.query(Sale).filter(
-        Sale.company_id == company_id,
-        Sale.date >= start,
-        Sale.date <= end
-    ).all()
-
-    expenses = db.query(Expense).filter(
-        Expense.company_id == company_id,
-        Expense.date >= start,
-        Expense.date <= end
-    ).all()
-
-    df_sales = pd.DataFrame([{
-        "date": s.date,
-        "product_id": s.product_id,
-        "quantity": s.quantity,
-        "price": s.price,
-        "user_id": s.user_id
-    } for s in sales])
-
-    df_exp = pd.DataFrame([{
-        "date": e.date,
-        "description": e.description,
-        "category": e.category,
-        "amount": e.amount
-    } for e in expenses])
-
-    return df_sales, df_exp
 
