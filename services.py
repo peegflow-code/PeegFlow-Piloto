@@ -148,29 +148,50 @@ def add_expense(db: Session, company_id: int, desc: str, amount: float, category
     ))
     db.commit()
 
-def get_financial_by_range(db: Session, company_id: int, start, end):
-    sales_q = db.query(
-        Sale.date,
-        Sale.quantity,
-        Sale.price,
-        Product.name.label("product_name")
-    ).join(Product).filter(
-        Sale.company_id == company_id,
-        Sale.date.between(start, end)
-    ).statement
+def get_financial_by_range(
+    db: Session,
+    company_id: int,
+    start_date: datetime,
+    end_date: datetime
+):
+    # Ajuste de datas
+    if end_date.hour == 0 and end_date.minute == 0:
+        end_date = end_date.replace(hour=23, minute=59, second=59)
 
-    exp_q = db.query(
-        Expense.date,
-        Expense.category,
-        Expense.description,
-        Expense.amount
-    ).filter(
-        Expense.company_id == company_id,
-        Expense.date.between(start, end)
-    ).statement
-
-    return (
-        pd.read_sql(sales_q, db.bind),
-        pd.read_sql(exp_q, db.bind)
+    # --- VENDAS ---
+    sales_q = (
+        db.query(
+            Sale.date.label("date"),
+            Sale.quantity.label("quantity"),
+            Sale.price.label("price"),
+            Product.name.label("product_name")
+        )
+        .select_from(Sale)               # ✅ ANCORAGEM EXPLÍCITA
+        .join(Product, Product.id == Sale.product_id)
+        .filter(
+            Sale.company_id == company_id,
+            Sale.date >= start_date,
+            Sale.date <= end_date
+        )
     )
 
+    # --- DESPESAS ---
+    expenses_q = (
+        db.query(
+            Expense.date.label("date"),
+            Expense.description.label("description"),
+            Expense.category.label("category"),
+            Expense.amount.label("amount")
+        )
+        .filter(
+            Expense.company_id == company_id,
+            Expense.date >= start_date,
+            Expense.date <= end_date
+        )
+    )
+
+    # Pandas
+    df_sales = pd.read_sql(sales_q.statement, db.bind)
+    df_expenses = pd.read_sql(expenses_q.statement, db.bind)
+
+    return df_sales, df_expenses
