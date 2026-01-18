@@ -492,19 +492,19 @@ for idx in range(len(st.session_state["cart"]) - 1, -1, -1):
     c1.write(item.get("name", ""))
     c2.write(f'Qtd: {int(item.get("qty", 1))}')
 
-        if c3.button("➕", key=f"inc_{idx}"):
-            item["qty"] = int(item.get("qty", 1)) + 1
-            st.rerun()
+    if c3.button("➕", key=f"inc_{idx}"):
+        item["qty"] = int(item.get("qty", 1)) + 1
+        st.rerun()
 
-        if c4.button("➖", key=f"dec_{idx}"):
-            item["qty"] = int(item.get("qty", 1)) - 1
-            if item["qty"] <= 0:
-                st.session_state["cart"].pop(idx)
-            st.rerun()
-
-        if c5.button("❌", key=f"del_{idx}"):
+    if c4.button("➖", key=f"dec_{idx}"):
+        item["qty"] = int(item.get("qty", 1)) - 1
+        if item["qty"] <= 0:
             st.session_state["cart"].pop(idx)
-            st.rerun()
+        st.rerun()
+
+    if c5.button("❌", key=f"del_{idx}"):
+        st.session_state["cart"].pop(idx)
+        st.rerun()
 
     payment = st.radio("Pagamento", ["PIX", "Dinheiro", "Cartão"], horizontal=True, key="pdv_payment")
 
