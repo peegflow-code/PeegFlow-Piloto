@@ -439,7 +439,7 @@ with col_receipt:
 
             # ---------- DESCONTO ----------
             st.markdown("### 🏷️ Desconto")
-            d1, d2 = st.columns(2)
+                d1, d2 = st.columns(2)
             with d1:
                 st.session_state["discount_type"] = st.selectbox(
                     "Tipo", ["R$", "%"], key="disc_type"
