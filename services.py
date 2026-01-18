@@ -31,10 +31,6 @@ def authenticate(db: Session, username: str, password: str):
 # =========================
 
 def create_initial_data(db: Session):
-    """
-    Executa uma única vez.
-    Garante empresa + admin funcional.
-    """
     company = db.query(Company).filter(Company.id == 1).first()
     if not company:
         company = Company(
@@ -46,16 +42,19 @@ def create_initial_data(db: Session):
         db.add(company)
         db.commit()
 
-    admin = db.query(User).filter(User.username == "admin").first()
-    if not admin:
-        admin = User(
-            username="admin",
-            password_hash=hash_password("admin123"),
-            role="admin",
-            company_id=company.id
-        )
-        db.add(admin)
-        db.commit()
+    # 🔥 REMOVE admin antigo (SHA256)
+    db.query(User).filter(User.username == "admin").delete()
+    db.commit()
+
+    # ✅ CRIA admin novo (bcrypt)
+    admin = User(
+        username="admin",
+        password_hash=hash_password("admin123"),
+        role="admin",
+        company_id=company.id
+    )
+    db.add(admin)
+    db.commit()
 
 # =========================
 # 👥 CRUD DE USUÁRIOS
